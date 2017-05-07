@@ -6,7 +6,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
+	"runtime"
+	"strings"
+	"sync"
 )
 
 var (
@@ -50,10 +54,19 @@ type Req struct {
 	Stashes      []Stash `json:"stashes"`
 }
 
-func processResponse(body io.ReadCloser) {
+func (r *Req) findItem(name string) {
+	for _, stash := range r.Stashes {
+		for _, item := range stash.Items {
+			if strings.Contains(item.Name, name) {
+				Info.Println("Found", item, "for", item.Price, "in", stash.Account)
+			}
+		}
+	}
+}
+
+func processResponse(body io.ReadCloser) (r *Req) {
 	Info.Println("Start processing response with request id", changeId)
 	jsonStream := json.NewDecoder(body)
-	var r Req
 	err := jsonStream.Decode(&r)
 	if err != nil {
 		Error.Fatal(err)
@@ -66,9 +79,17 @@ func processResponse(body io.ReadCloser) {
 		}
 	}*/
 	changeId = r.NextChangeId
+	return
 }
 
 func main() {
+	var wg sync.WaitGroup
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	log.Println(mem.Alloc)
 	logFile, _ := os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	multiInfo := io.MultiWriter(logFile, os.Stdout)
 	multiError := io.MultiWriter(logFile, os.Stderr)
@@ -78,6 +99,11 @@ func main() {
 		if err != nil {
 			Error.Println(err)
 		}
-		processResponse(resp.Body)
+		r := processResponse(resp.Body)
+		r.findItem("Chaos Orb")
 	}
+	runtime.ReadMemStats(&mem)
+	log.Println(mem.Alloc)
+	wg.Add(1)
+	wg.Wait()
 }
